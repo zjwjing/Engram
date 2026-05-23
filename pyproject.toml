@@ -64,6 +64,17 @@ openai = ["openai>=1.30.0"]
 # Local sentence-transformers embedder for SDK private namespace encryption
 local-embedder = ["sentence-transformers>=3.0.0"]
 
+# Arweave permanent storage upload
+arweave = ["arweave-python-client>=2.0.0"]
+
+# PDF ingestion via ingest_document()
+pdf = ["pypdf>=4.0.0"]
+
+# All media/ingestion extras bundled
+media = [
+    "engram-subnet[arweave,pdf]",
+]
+
 # CLI (engram ingest / query / status / init)
 cli = [
     "rich>=13.7.0",
@@ -83,7 +94,7 @@ dev = [
 
 # Everything — miners, validators, SDK, CLI
 all = [
-    "engram-subnet[node,qdrant,openai,local-embedder,cli,dev]",
+    "engram-subnet[node,qdrant,openai,local-embedder,media,cli,dev]",
 ]
 
 [project.urls]

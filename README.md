@@ -75,6 +75,14 @@ Engram is a Bittensor subnet that turns text, images, and documents into **perma
 pip install engram-subnet
 ```
 
+For PDF ingestion or Arweave uploads, install the optional extras:
+
+```bash
+pip install "engram-subnet[pdf]"        # PDF ingestion via ingest_document()
+pip install "engram-subnet[arweave]"    # Arweave permanent storage upload
+pip install "engram-subnet[media]"      # Both PDF + Arweave
+```
+
 Or from source:
 
 ```bash
