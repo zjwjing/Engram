@@ -72,6 +72,7 @@ from loguru import logger
 
 from engram.config import CHALLENGE_INTERVAL_SECS, RECALL_K, SUBNET_VERSION
 from engram.miner.auth import sign_request
+from engram.relay.client import RelayClient
 from engram.validator.challenge import ChallengeDispatcher
 from engram.validator.ground_truth import GroundTruthManager
 from engram.validator.reward import RewardManager
@@ -309,6 +310,7 @@ async def run() -> None:
         validator_hotkey_hex=wallet.hotkey.public_key.hex() if wallet else "0" * 64
     )
     reward_manager = RewardManager(subtensor=subtensor, wallet=wallet, netuid=netuid)
+    relay_client = RelayClient.from_env(keypair=wallet.hotkey if wallet else None)
 
     for cid in ground_truth.all_cids():
         challenge_dispatcher.register_cid(cid)
@@ -491,6 +493,19 @@ async def run() -> None:
                     latency_scores=latency_scores,
                     proof_rates=proof_rates,
                     slashed_uids=slashed_uids,
+                )
+                try:
+                    _block = subtensor.get_current_block() if subtensor else 0
+                    _val_uid = int(metagraph.hotkeys.index(wallet.hotkey.ss58_address)) if wallet and hasattr(metagraph, "hotkeys") else 0
+                except Exception:
+                    _block, _val_uid = 0, 0
+                relay_client.emit(
+                    recall_scores=recall_scores,
+                    latency_scores=latency_scores,
+                    proof_rates=proof_rates,
+                    netuid=netuid,
+                    block=_block,
+                    validator_uid=_val_uid,
                 )
 
             # ── Repair sweep ──────────────────────────────────────────────────

@@ -17,39 +17,13 @@
 | Timing + payload padding for private namespace queries | AML.T0036 side-channel | current |
 | REQUIRE_HOTKEY_SIG defaults to true on mainnet via ENGRAM_ENV | AML.T0043 unsigned bypass | current |
 | Weekly miner auto-restart cron (`/etc/cron.d/engram-miner-restart`) | operational resilience | current |
+| Shamir K-of-N threshold decryption — `engram/sdk/shamir.py`, `KeyShareStore`, `KeyShareSynapse`/`KeyShareRetrieve`, miner HTTP endpoints | AML.T0010 compromised miner | `60d4c669` |
 
 ---
 
-### 🔲 Threshold Decryption (K-of-N miners)
+### ✅ Threshold Decryption (K-of-N miners)
 
-**Priority:** High  
-**ATLAS:** AML.T0010 — Compromised miner acting as honest node  
-**Effort:** 1–2 weeks
-
-**Problem:**  
-A miner that passes all spec checks and stake attestation can still log decrypted content
-at retrieval time. No software-only fix fully closes this without hardware TEE.
-
-**Solution:**  
-Split the namespace decryption key across N miners using Shamir Secret Sharing.
-Any single miner holds only a key share — it cannot decrypt alone.
-Retrieval requires K-of-N miners to cooperate via a lightweight MPC round.
-
-**Design sketch:**
-```
-1. Client generates namespace key K.
-2. Split K into N shares using Shamir(k=2, n=3) (or configurable).
-3. Distribute one share to each of the top-N miners by stake/trust.
-4. At query time, client requests partial decryptions from K miners.
-5. Client reconstructs K locally — miners never see the full key.
-```
-
-**Files to touch:**
-- `engram/sdk/encryption.py` — add `ShamirKeySplit` / `ShamirKeyReconstruct`
-- `engram/sdk/client.py` — distribute shares on namespace creation; collect on query
-- `engram/protocol.py` — add `KeyShareSynapse` for share distribution
-- `engram/miner/` — add key share store + partial-decrypt endpoint
-- `neurons/miner.py` — register share endpoint
+Shipped. `engram/sdk/shamir.py` (GF(256) Shamir split/reconstruct), `engram/miner/key_share_store.py` (SQLite share store), `KeyShareSynapse`/`KeyShareRetrieve` protocol synapses, and `/KeyShareSynapse` + `/KeyShareRetrieve` HTTP endpoints in `neurons/miner.py`. Client-side `distribute_key_shares` / `collect_key_shares` in `engram/sdk/client.py`. 23 passing tests.
 
 ---
 
@@ -77,20 +51,20 @@ Validators become AI message buses — Engram subnet outputs forwarded as signed
 
 Architecture: `Engram Subnet → Validator Listener → Relay Adapter → Signed Payload → XERIS Mainnet → SageBot / Agents`
 
-### Phase 1 — Relay Core
+### Phase 1 — Relay Core ✅
 
-- [ ] Create `engram/relay/` module
-- [ ] `engram/relay/adapter.py` — normalize subnet output to XERIS payload schema (include `output_hash`, `netuid`, `block`)
-- [ ] `engram/relay/client.py` — HTTP/gRPC client that submits signed payload to XERIS endpoint
-- [ ] `engram/relay/signer.py` — sign payload with validator sr25519 hotkey (reuse existing key infra)
-- [ ] Add output hash (`sha256(json.dumps(result))`) + Engram block number to every payload to prevent tampering
+- [x] Create `engram/relay/` module
+- [x] `engram/relay/adapter.py` — normalize subnet output to XERIS payload schema (include `output_hash`, `netuid`, `block`)
+- [x] `engram/relay/client.py` — HTTP/gRPC client that submits signed payload to XERIS endpoint
+- [x] `engram/relay/signer.py` — sign payload with validator sr25519 hotkey (reuse existing key infra)
+- [x] Add output hash (`sha256(json.dumps(result))`) + Engram block number to every payload to prevent tampering
 
 ### Phase 2 — Validator Integration
 
-- [ ] Hook `relay.emit()` into `engram/validator/forward.py` after scoring, before `set_weights()`
+- [x] Hook `relay.emit()` into `neurons/validator.py` after `set_weights()`
+- [x] Nonce (block + uid + timestamp) on every payload to prevent replay attacks
+- [x] Log all relay submissions to local SQLite for debugging and audit
 - [ ] Finality guard — only relay after 3 block confirmations on Engram side
-- [ ] Nonce (block + uid + timestamp) on every payload to prevent replay attacks
-- [ ] Log all relay submissions to local SQLite for debugging and audit
 
 ### Phase 3 — Trust & Reliability
 
