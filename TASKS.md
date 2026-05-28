@@ -68,10 +68,10 @@ Architecture: `Engram Subnet → Validator Listener → Relay Adapter → Signed
 
 ### Phase 3 — Trust & Reliability
 
+- [x] Dead-letter queue — retry with exponential backoff (10s→300s cap, 10 max attempts), abandoned entries logged as errors, never silently dropped
+- [x] `relay_client.status()` — returns dlq_pending, dlq_abandoned, total_ok, last_ok_hash
 - [ ] Multi-validator quorum — at least 2 validator signatures before XERIS accepts payload
 - [ ] XERIS-side verification — `output_hash` checked against Engram on-chain state
-- [ ] Dead-letter queue — retry with exponential backoff on XERIS submission failure, never drop
-- [ ] `/relay/status` health endpoint for monitoring
 
 ### Phase 4 — SageBot Integration
 

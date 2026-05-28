@@ -161,3 +161,125 @@ def test_relay_client_disabled_via_env(monkeypatch, tmp_path):
     monkeypatch.setenv("ENGRAM_RELAY_ENABLED", "false")
     client = RelayClient.from_env()
     assert not client._enabled
+
+
+# ── DLQ tests ─────────────────────────────────────────────────────────────────
+
+def _failing_client(tmp_path):
+    """Client pointed at a URL that will always refuse connections."""
+    return RelayClient(
+        xeris_url="http://127.0.0.1:19999/relay",
+        log_db=tmp_path / "relay_log.db",
+        timeout=0.5,
+    )
+
+
+def test_failed_submission_enters_dlq(tmp_path):
+    import sqlite3
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    result = client.emit(recall, latency, proofs, block=1)
+    assert result is False
+    conn = sqlite3.connect(str(tmp_path / "relay_log.db"))
+    rows = conn.execute("SELECT status FROM relay_dlq").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "pending"
+
+
+def test_dlq_entry_has_correct_block(tmp_path):
+    import sqlite3
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs, block=42)
+    conn = sqlite3.connect(str(tmp_path / "relay_log.db"))
+    row = conn.execute("SELECT block, attempts FROM relay_dlq").fetchone()
+    assert row[0] == 42
+    assert row[1] == 0
+
+
+def test_dlq_retry_succeeds_on_next_emit(tmp_path, monkeypatch):
+    """Simulate: first emit fails → DLQ enqueued → second emit delivers DLQ entry."""
+    import sqlite3
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs, block=10)
+
+    # Force next_retry_at into the past so flush picks it up
+    client._db.execute("UPDATE relay_dlq SET next_retry_at=0")
+    client._db.commit()
+
+    # Patch _http_post to succeed
+    monkeypatch.setattr(client, "_http_post", lambda body, oh, blk: True)
+    client._flush_dlq()
+
+    conn = sqlite3.connect(str(tmp_path / "relay_log.db"))
+    row = conn.execute("SELECT status FROM relay_dlq").fetchone()
+    assert row[0] == "delivered"
+
+
+def test_dlq_abandoned_after_max_attempts(tmp_path):
+    import sqlite3
+    from engram.relay.client import _MAX_ATTEMPTS
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs, block=99)
+
+    # Drive attempts to the limit
+    client._db.execute(
+        "UPDATE relay_dlq SET attempts=?, next_retry_at=0",
+        (_MAX_ATTEMPTS - 1,),
+    )
+    client._db.commit()
+    client._flush_dlq()
+
+    conn = sqlite3.connect(str(tmp_path / "relay_log.db"))
+    row = conn.execute("SELECT status, attempts FROM relay_dlq").fetchone()
+    assert row[0] == "abandoned"
+    assert row[1] == _MAX_ATTEMPTS
+
+
+def test_dlq_not_flushed_before_retry_window(tmp_path):
+    import sqlite3
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs, block=5)
+
+    # next_retry_at is in the future — flush should not touch the entry
+    client._db.execute("UPDATE relay_dlq SET next_retry_at=?", (time.time() + 9999,))
+    client._db.commit()
+    client._flush_dlq()
+
+    conn = sqlite3.connect(str(tmp_path / "relay_log.db"))
+    row = conn.execute("SELECT attempts FROM relay_dlq").fetchone()
+    assert row[0] == 0  # untouched
+
+
+# ── status() tests ────────────────────────────────────────────────────────────
+
+def test_status_dry_run_defaults(tmp_path):
+    client = RelayClient(xeris_url="", log_db=tmp_path / "relay_log.db")
+    s = client.status()
+    assert s["enabled"] is False
+    assert s["dlq_pending"] == 0
+    assert s["dlq_abandoned"] == 0
+    assert s["total_ok"] == 0
+    assert s["last_ok_hash"] is None
+
+
+def test_status_reflects_dlq_pending(tmp_path):
+    client = _failing_client(tmp_path)
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs, block=1)
+    s = client.status()
+    assert s["dlq_pending"] == 1
+    assert s["total_failed"] >= 1
+
+
+def test_status_dry_run_increments_total_ok(tmp_path, monkeypatch):
+    client = RelayClient(xeris_url="", log_db=tmp_path / "relay_log.db")
+    recall, latency, proofs = _sample_scores()
+    client.emit(recall, latency, proofs)
+    client.emit(recall, latency, proofs)
+    # dry_run entries are not counted as "ok"
+    s = client.status()
+    assert s["total_ok"] == 0

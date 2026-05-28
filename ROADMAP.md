@@ -37,7 +37,7 @@ This document tracks where Engram is, where it's going, and what contributions m
 - [ ] **Slash execution** — validators submit slashing transactions for miners below the proof-rate threshold
 - [ ] **Staking gate on ingest** — minimum TAO stake required to write to the network (anti-spam)
 - [ ] **Stake-weighted replication** — assign replicas to highest-stake miners to align incentives
-- [ ] **Miner reputation score** — persistent per-miner reliability record fed into assignment
+- [x] **Miner reputation score** — persistent per-miner reliability record (`ReputationStore`) fed into `RewardManager`; EMA score + confidence discount for new miners; `reliability_map()` available to replication assignment
 - [ ] **Validator consensus** — multi-validator agreement on scores before weight-setting
 - [ ] **PyPI stable release** — `engram-subnet 1.0.0` with stable API contract
 

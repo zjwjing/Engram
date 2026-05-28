@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
+from engram.validator.reputation import ReputationStore
 from engram.validator.scorer import compute_miner_score, normalize_scores
 
 
@@ -24,7 +25,8 @@ class RewardManager:
         self._wallet = wallet
         self._netuid = netuid
         self.moving_averages: dict[int, float] = {}
-        self.alpha: float = 0.1  # 10% recent score, 90% historical
+        self.alpha: float = 0.1  # 10% recent score, 90% historical (kept for backward compat)
+        self.reputation = ReputationStore()
 
     def set_weights(
         self,
@@ -47,17 +49,21 @@ class RewardManager:
             logger.warning(f"Slashing {len(slashed)} miners with weight=0 | uids={sorted(slashed)}")
 
         raw_scores: dict[int, float] = {}
+        hotkeys: list[str] = list(metagraph.hotkeys) if hasattr(metagraph, "hotkeys") else []
         for uid in uids:
             if uid in slashed:
-                # Hard zero — slash overrides all other scores
                 self.moving_averages[uid] = 0.0
                 raw_scores[uid] = 0.0
                 continue
 
+            recall     = recall_scores.get(uid, 0.0)
+            latency_ms = latency_scores.get(uid)
+            proof_rate = proof_rates.get(uid, 0.0)
+
             score = compute_miner_score(
-                recall=recall_scores.get(uid, 0.0),
-                latency_ms=latency_scores.get(uid),
-                proof_success_rate=proof_rates.get(uid, 0.0),
+                recall=recall,
+                latency_ms=latency_ms,
+                proof_success_rate=proof_rate,
             )
 
             if uid in self.moving_averages:
@@ -66,6 +72,16 @@ class RewardManager:
                 self.moving_averages[uid] = score
 
             raw_scores[uid] = self.moving_averages[uid]
+
+            hotkey = hotkeys[uid] if uid < len(hotkeys) else ""
+            self.reputation.update(
+                uid,
+                hotkey=hotkey,
+                recall=recall,
+                proof_rate=proof_rate,
+                composite_score=score,
+                latency_ms=latency_ms,
+            )
 
         normalized = normalize_scores({str(uid): s for uid, s in raw_scores.items()})
 
@@ -78,6 +94,7 @@ class RewardManager:
         logger.info(
             f"Setting weights | top5={sorted(raw_scores.items(), key=lambda x: -x[1])[:5]}"
         )
+        logger.info(self.reputation.summary())
 
         try:
             result = self._subtensor.set_weights(
